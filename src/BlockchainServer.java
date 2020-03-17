@@ -6,99 +6,122 @@ import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.SocketException;
 
 public class BlockchainServer {
 
 	private Blockchain blockchain;
-	public ServerSocket ss;
-	
-	public BlockchainServer() { blockchain = new Blockchain(); }
-	
+	private ServerSocket ss;
+	private boolean closeServer; 
+
+	public BlockchainServer() { 
+		blockchain = new Blockchain();
+		closeServer = false;
+	}
+
 
 	// getters and setters
 	public void setBlockchain(Blockchain blockchain) { this.blockchain = blockchain; }
 	public Blockchain getBlockchain() { return blockchain; }
 	public void setServerSocket(ServerSocket ss) { this.ss = ss; }
 	public ServerSocket getServerSocket() { return ss; }
-	
-	
-	
-	
+	public void setCloseServer(boolean closeServer) { this.closeServer = closeServer; }
+	public boolean getCloseServer() { return closeServer; }
+
 	public static void main(String[] args) {
 		// Check for correct amount of arguments
-		if (args.length != 1) {
-			return;
-		}
-		int portNumber = Integer.parseInt(args[0]);
-		BlockchainServer bcs = new BlockchainServer();
-
 		while(true) {
-			try {
-				// Create a server socket with the given port number
-				bcs.setServerSocket(new ServerSocket(portNumber));
-				// Wait for a connection to be made and set a socket to listen to request
-				Socket portSocket = bcs.getServerSocket().accept();
-				// Define streams of the communication
-				InputStream clientInputStream =  portSocket.getInputStream();
-				OutputStream clientOutputStream = portSocket.getOutputStream();
-				// Handle requests
-				bcs.serverHandler(clientInputStream, clientOutputStream);
-				clientInputStream.close();
-				clientOutputStream.close();
-			}catch(IOException e){
-				e.printStackTrace();
-			}		
+			if (args.length != 1) {
+				return;
+			}
+			int portNumber = Integer.parseInt(args[0]);
+			BlockchainServer bcs = new BlockchainServer();
+
+			while(true) {
+				try {
+					// Create a server socket with the given port number
+					bcs.setServerSocket(new ServerSocket(portNumber));
+					// Wait for a connection to be made and set a socket to listen to request
+					Socket portSocket = bcs.getServerSocket().accept();
+					// Define streams of the communication
+					InputStream clientInputStream =  portSocket.getInputStream();
+					OutputStream clientOutputStream = portSocket.getOutputStream();
+					// Handle requests
+					bcs.serverHandler(clientInputStream, clientOutputStream);
+					// After termination, close the server
+					bcs.getServerSocket().close();
+					portSocket.close();
+
+					if (bcs.getCloseServer()) {
+						bcs.setCloseServer(false);
+						break;
+					}
+				}catch(IOException e){
+					e.printStackTrace();
+				}
+			}
 		}
 	}
-
 
 	public void serverHandler(InputStream clientInputStream, OutputStream clientOutputStream) {
 
 		BufferedReader inputReader = new BufferedReader(new InputStreamReader(clientInputStream));
 		PrintWriter outWriter = new PrintWriter(clientOutputStream, true);
 		String request = "";
-		
-		try {
-		// Parse request from inputReader
-		request = (inputReader.readLine() != null) ? inputReader.readLine() : "error";
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-		
-		switch(validateRequest(request)) {
+		do {
+			try {
+				// Parse request from inputReader
+				request =  inputReader.readLine();
+				if (request == null || request.equals("")) {
+					request = "null";
+				}
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+			boolean ccCalled = false;
+			String s = (request.contentEquals("null")) ? "null" : validateRequest(request);
+			switch(s) {
 			case "tx":
 				handleTransactionRequest(request, outWriter);
 				break;
 			case "pb": 
 				handlePrintBlockchain(outWriter);
 				break;
+			case "null":
 			case "cc":
-				handleCloseConnection();
+				ccCalled = true;
+				break;		
 			default:
 				outWriter.print("Error\n\n");
-		}
+				outWriter.flush();
+			}
+			if (ccCalled) {
+				break;
+			}
+		} while (!request.equals("null"));
+		setCloseServer(true);
 	}
 
 	public static String validateRequest(String request) {
 		String result = "error";
-		if (request == null) {
+		if (request == null || request.contentEquals("")) {
+			return result;
+		} else {
+			if (request.contentEquals("pb")) {
+				// Check for pb
+				result = "pb";
+			} else if (request.contentEquals("cc")) {
+				// Check for cc
+				result = "cc";
+			} else {
+				// If it looks like a tx request, validate format
+				String[] parsedRequest = Blockchain.parseTransactionString(request);
+				//TODO: This seems sketchy, if validation fails, look here
+				if (parsedRequest[0] != null || request.charAt(0) == 't') {
+					result = "tx";
+				}
+			}
 			return result;
 		}
-		
-		if (request.equals("pb")) {
-			// Check for pb
-			result = "pb";
-		} else if (request.equals("cc")) {
-			// Check for cc
-			result = "cc";
-		} else if (request.substring(0, 1).equals("tx")){
-			// If it looks like a tx request, validate format
-			String[] parsedRequest = Blockchain.parseTransactionString(request);
-			result = (Blockchain.validateTransaction(parsedRequest)) ? "tx" : "error"; 
-		}
-
-		return result;
 	}
 
 	public void handleTransactionRequest(String txString, PrintWriter outWriter) {
@@ -108,31 +131,12 @@ public class BlockchainServer {
 		} else {
 			outWriter.print("Rejected\n\n");
 		}
+		outWriter.flush();
 	}
 
 	public void handlePrintBlockchain(PrintWriter outWriter) {
-
-		// Printing complying with the given format
-		System.out.print("Pool:\n");
-		String cutOffRule = new String(new char[81]).replace("\0", "-") + "\n";
-		String transactionsString = "";
-		for (int jj = 0; jj < getBlockchain().getPool().size(); jj++) {
-			transactionsString += getBlockchain().getPool().get(jj).toString();
-		}
-		outWriter.print(cutOffRule + transactionsString + cutOffRule + "\n");
-
-		if (getBlockchain().getHead() != null) {
-			outWriter.print(getBlockchain().getHead().toString() + "\n");
-		}
-	}
-
-	public void handleCloseConnection() {
-		try{
-			ss.close();
-		} catch (SocketException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
+		// Blockchain's toString is all we need
+		outWriter.print(getBlockchain().toString() + "\n");
+		outWriter.flush();
 	}
 }
