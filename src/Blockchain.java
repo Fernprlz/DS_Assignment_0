@@ -74,7 +74,7 @@ public class Blockchain {
 		return result;
 	}
 
-	public String[] parseTransactionString(String txString) {
+	public static String[] parseTransactionString(String txString) {
 		String[] tmp = txString.split("\\|");
 		String[] result = new String[2];
 
